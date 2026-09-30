@@ -105,12 +105,19 @@ impl<'input> Lexer<'input> {
 
     /// Has the lexer reached the end of input?
     pub fn end_of_input(&self) -> bool {
-        todo!()
+        self.pos == self.input.len()
     }
 
     // Skip comments and whitespace
     fn skip_whitespace(&mut self) {
-        todo!()
+        if self.end_of_input() {
+            return;
+        }
+
+        let skip_match = self.whitespace.find(&self.input[self.pos..]);
+        if let Some(skip_match) = skip_match {
+            self.pos += skip_match.len();
+        }
     }
 
     /// Get the next token if possible.
@@ -120,12 +127,50 @@ impl<'input> Lexer<'input> {
     /// - Some(token) where the token is the next token.
     /// - Some(Error) if none of the recognizers work, i.e. if there is a lexer error.
     pub fn next<'a>(&'a mut self) -> Option<Token<'input>> {
-        todo!()
+        // println!("pos: {}", self.pos);
+        self.skip_whitespace();
+        if self.end_of_input() {
+            return None;
+        }
+
+        // Drop what doesn't match
+        let mut matches: Vec<(regex::Match<'_>, &TokenKind)> = self
+            .matchers
+            .iter()
+            .filter_map(|(re, token)| {
+                if let Some(m) = re.find(&self.input[self.pos..]) {
+                    Some((m, token))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Keep longest match
+        matches.sort_by_key(|(m, _)| m.len());
+        let longest = matches.last();
+        Some(match longest {
+            Some((m, token)) => {
+                self.pos += m.len();
+
+                Token {
+                    kind: **token,
+                    text: m.as_str(),
+                }
+            }
+            None => {
+                self.pos += 1;
+                Token {
+                    kind: TokenKind::Error,
+                    text: &self.input[self.pos - 1..self.pos],
+                }
+            }
+        })
     }
 }
 
 /// Read all the tokens from input
-pub fn get_tokens(input: &str) -> Vec<Token> {
+pub fn get_tokens(input: &'_ str) -> Vec<Token<'_>> {
     let mut lexer = Lexer::new(input);
 
     let mut tokens = vec![];
@@ -142,17 +187,17 @@ mod tests {
     // SECTION: helpers
 
     // Create an id token
-    fn id(text: &str) -> Token {
+    fn id(text: &'_ str) -> Token<'_> {
         Token { kind: Id, text }
     }
 
     // Create a num token
-    fn num(text: &str) -> Token {
+    fn num(text: &'_ str) -> Token<'_> {
         Token { kind: Num, text }
     }
 
     // Create an error token
-    fn error(text: &str) -> Token {
+    fn error(text: &'_ str) -> Token<'_> {
         Token { kind: Error, text }
     }
 

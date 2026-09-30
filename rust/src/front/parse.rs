@@ -36,6 +36,11 @@ impl Debug for ParseError {
 
 type ParseResult<T> = Result<T, ParseError>;
 
+/// helper function to create a ParseError
+fn parse_err<T>(err: String) -> ParseResult<T> {
+    ParseResult::Err(ParseError(err))
+}
+
 pub fn parse(input: &str) -> Result<Program, ParseError> {
     let mut parser = Parser::new(input);
     let program = parser.parse_program()?;
@@ -60,52 +65,130 @@ impl<'a> Parser<'a> {
         Parser { tokens }
     }
 
-    // Return the next token
-    fn peek(&self) -> Option<Token> {
+    /// Return the next token
+    fn peek(&self) -> Option<Token<'_>> {
         self.tokens.last().copied()
     }
 
-    // Pop and return the next token
-    fn next(&mut self) -> ParseResult<Token> {
-        todo!()
+    /// Pop and return the next token
+    fn next(&mut self) -> ParseResult<Token<'_>> {
+        if let Some(t) = self.tokens.pop() {
+            ParseResult::Ok(t)
+        } else {
+            parse_err("reached EOF too early".to_string())
+        }
     }
 
-    // Does the next token match the given kind?
+    /// Does the next token match the given kind?
     fn next_is(&self, kind: TokenKind) -> bool {
-        todo!()
+        self.peek().is_some_and(|x| x.kind == kind)
     }
 
-    // Consume a token of given type if possible, return if it is consumed
+    /// Consume a token of given type if possible, return if it is consumed
     fn eat(&mut self, kind: TokenKind) -> bool {
-        todo!()
+        if self.next_is(kind) {
+            self.tokens.pop();
+            true
+        } else {
+            false
+        }
     }
 
-    // Consume and return a token of the given type; fail on mismatch
-    fn expect(&mut self, kind: TokenKind) -> ParseResult<Token> {
-        todo!()
+    /// Consume and return a token of the given type; fail on mismatch
+    fn expect(&mut self, kind: TokenKind) -> ParseResult<Token<'_>> {
+        let t = self.next()?;
+
+        if t.kind != kind {
+            parse_err(format!(
+                "next token does not match given type: {}, was: {}",
+                kind, t.kind
+            ))
+        } else {
+            ParseResult::Ok(t)
+        }
     }
 
     fn parse_program(&mut self) -> ParseResult<Program> {
-        todo!()
+        let mut stmts: Vec<Stmt> = Vec::new();
+        while !self.tokens.is_empty() {
+            stmts.push(self.parse_stmt()?);
+        }
+
+        ParseResult::Ok(Program { stmts })
     }
 
     fn parse_stmt(&mut self) -> ParseResult<Stmt> {
-        todo!()
+        use Stmt::*;
+
+        let t = self.next()?;
+        ParseResult::Ok(match t.kind {
+            TokenKind::Assign => {
+                let lhs = id(self.expect(TokenKind::Id)?.text);
+                let rhs = self.parse_expr()?;
+                Assign(lhs, rhs)
+            }
+            TokenKind::Print => Print(self.parse_expr()?),
+            TokenKind::Read => {
+                let var = id(self.expect(TokenKind::Id)?.text);
+                Read(var)
+            }
+            TokenKind::If => {
+                let guard = self.parse_expr()?;
+                let tt = self.parse_block()?;
+                let ff = self.parse_block()?;
+                If { guard, tt, ff }
+            }
+            _ => return parse_err(format!("unexpected token {} when parsing stmt", t)),
+        })
     }
 
     fn parse_block(&mut self) -> ParseResult<Vec<Stmt>> {
-        todo!()
+        self.expect(TokenKind::LBrace)?;
+
+        let mut stmts = Vec::new();
+        while !self.eat(TokenKind::RBrace) {
+            stmts.push(self.parse_stmt()?)
+        }
+
+        ParseResult::Ok(stmts)
     }
 
     fn parse_expr(&mut self) -> ParseResult<Expr> {
         use Expr::*;
 
-        todo!()
+        let t = self.next()?;
+        ParseResult::Ok(match t.kind {
+            TokenKind::Id => Var(id(t.text)),
+            TokenKind::Num => Const(
+                t.text
+                    .parse()
+                    .map_err(|err: std::num::ParseIntError| ParseError(err.to_string()))?,
+            ),
+            TokenKind::Tilde => Negate(Box::new(self.parse_expr()?)),
+            _ => {
+                let op = match t.text {
+                    "*" => BOp::Mul,
+                    "/" => BOp::Div,
+                    "+" => BOp::Add,
+                    "-" => BOp::Sub,
+                    "<" => BOp::Lt,
+                    s => {
+                        return parse_err(format!("unrecognized token {} when parsing binop", s));
+                    }
+                };
+                self.parse_binop(op)?
+            }
+        })
     }
 
-    // helper: read and parse both sides of given binary operation
+    /// helper: read and parse both sides of given binary operation
     fn parse_binop(&mut self, op: BOp) -> ParseResult<Expr> {
-        todo!()
+        use Expr::*;
+
+        let lhs = Box::new(self.parse_expr()?);
+        let rhs = Box::new(self.parse_expr()?);
+
+        ParseResult::Ok(BinOp { op, lhs, rhs })
     }
 }
 
