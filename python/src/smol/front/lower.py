@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from smol.front import ast
 from smol.middle import tir
+from smol.middle.tir import *
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,8 +47,25 @@ def lower(program: ast.Program) -> tir.Program:
 
 def construct_cfg(entries: list[TvEntry]) -> dict[str, tir.Block]:
     """Convert a translation vector into a basic-block map."""
-    del entries
-    raise NotImplementedError("TODO: construct the control-flow graph")
+    entries.reverse()
+    blocks = {}
+
+    while entries:
+        label = entries[-1]
+        entries.pop()
+        assert isinstance(label, Label)
+        label = label.name
+        assert label not in blocks
+        insns: list[tir.Instruction] = []
+        while isinstance(entries[-1], Inner):
+            insns.append(entries[-1].instruction)
+            entries.pop()
+        term = entries[-1]
+        entries.pop()
+        assert isinstance(term, Term)
+        blocks[label] = tir.Block(tuple(insns), term.terminator)
+
+    return blocks
 
 
 class Lower:
@@ -60,6 +78,15 @@ class Lower:
     def add_declaration(self, name: str) -> None:
         self.declarations.add(name)
 
+    def emit(self, insn: tir.Instruction) -> None:
+        self.translation.append(Inner(insn))
+
+    def emit_term(self, term: tir.Terminator) -> None:
+        self.translation.append(Term(term))
+
+    def emit_label(self, lbl: str):
+        self.translation.append(Label(lbl))
+
     def lower_program(self, program: ast.Program) -> tir.Program:
         self.translation.append(Label("entry"))
         for statement in program.statements:
@@ -71,16 +98,63 @@ class Lower:
         )
 
     def lower_stmt(self, statement: ast.Stmt) -> None:
-        del statement
-        raise NotImplementedError("TODO: lower a statement")
+        match statement:
+            case ast.Assign(name, value):
+                rhs = self.lower_expr(value)
+                self.add_declaration(name)
+                self.emit(tir.Copy(dst=name, src=rhs))
+            case ast.Print(value):
+                rhs = self.lower_expr(value)
+                self.emit(tir.Print(rhs))
+            case ast.Read(name):
+                self.add_declaration(name)
+                self.emit(tir.Read(name))
+            case ast.If(guard, tt, ff):
+                cond = self.lower_expr(guard)
+                b_tt = self.mk_label()
+                b_ff = self.mk_label()
+                join = self.mk_label()
+                self.emit_term(tir.Branch(cond, b_tt, b_ff))
+                self.emit_label(b_tt)
+                for stmt in tt:
+                    self.lower_stmt(stmt)
+                self.emit_term(tir.Jump(join))
+                self.emit_label(b_ff)
+                for stmt in ff:
+                    self.lower_stmt(stmt)
+                self.emit_term(tir.Jump(join))
+                self.emit_label(join)
+
 
     def lower_expr(self, expression: ast.Expr) -> str:
-        del expression
-        raise NotImplementedError("TODO: lower an expression")
+        match expression:
+            case ast.Var(x):
+                self.add_declaration(x)
+                return x
+            case ast.Const(n):
+                lhs = self.mk_var("_const")
+                self.emit(tir.Const(dst=lhs, src=n))
+                return lhs
+            case ast.BinOp(op, lhs, rhs):
+                lhs = self.lower_expr(lhs)
+                rhs = self.lower_expr(rhs)
+                tmp = self.mk_var("_t")
+                self.emit(tir.Arith(op=op, dst=tmp, lhs=lhs, rhs=rhs))
+                return tmp
+            case ast.Negate(inner):
+                inner = self.lower_expr(inner)
+                zero = self.lower_expr(ast.Const(0))
+                tmp = self.mk_var("_t")
+                self.emit(tir.Arith(op=ast.BOp.SUB, dst=tmp, lhs=zero, rhs=inner))
+                return tmp
 
     def mk_var(self, prefix: str) -> str:
-        del prefix
-        raise NotImplementedError("TODO: create a fresh variable")
+        x = f"{prefix}{self.fresh_counter}"
+        self.fresh_counter += 1
+        self.add_declaration(x)
+        return x
 
     def mk_label(self) -> str:
-        raise NotImplementedError("TODO: create a fresh basic-block label")
+        l = f"bb{self.block_counter}"
+        self.block_counter += 1
+        return l
