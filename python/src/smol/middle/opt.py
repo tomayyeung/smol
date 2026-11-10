@@ -16,10 +16,27 @@
 
 """Tiny IR optimizations."""
 
-from smol.middle.tir import Program
+from smol.middle import const, tir
 
 
-def optimize(program: Program) -> Program:
-    return program
+def optimize(program: tir.Program) -> tir.Program:
+    """Replace instructions whose results are constant at the analysis fixpoint."""
+    pre = const.analyze(program)
+    blocks = {}
+    for label, block in program.blocks.items():
+        if label not in pre:
+            blocks[label] = block
+            continue
 
+        _, _, posts = const.analyze_bb(pre[label], block)
+        instructions = []
+        for instruction, post in zip(block.instructions, posts, strict=True):
+            match instruction:
+                case tir.Copy(dst, _) | tir.Arith(_, dst, _, _):
+                    match post[dst]:
+                        case const.Const(value):
+                            instruction = tir.Const(dst, value)
+            instructions.append(instruction)
+        blocks[label] = tir.Block(tuple(instructions), block.terminator)
 
+    return tir.Program(program.declarations, blocks)
