@@ -17,11 +17,8 @@
 """Execute tiny IR programs with numeric input and output."""
 
 from smol.front.ast import BOp
+from smol.int64 import to_i64
 from smol.middle import tir
-
-
-def _signed_64(value: int) -> int:
-    return (value + (1 << 63)) % (1 << 64) - (1 << 63)
 
 
 def _arith_64(op: BOp, left: int, right: int) -> int:
@@ -33,14 +30,10 @@ def _arith_64(op: BOp, left: int, right: int) -> int:
         case BOp.MUL:
             result = left * right
         case BOp.DIV:
-            if right == 0:
-                result = -1
-            else:
-                quotient = abs(left) // abs(right)
-                result = -quotient if (left < 0) != (right < 0) else quotient
+            result = left // right if right != 0 else -1
         case BOp.LT:
             result = int(left < right)
-    return _signed_64(result)
+    return to_i64(result)
 
 
 class VM:
@@ -74,13 +67,13 @@ class VM:
             case tir.Copy(dst, src):
                 self.env[dst] = self.env[src]
             case tir.Const(dst, value):
-                self.env[dst] = _signed_64(value)
+                self.env[dst] = to_i64(value)
             case tir.Arith(op, dst, lhs, rhs):
                 self.env[dst] = _arith_64(op, self.env[lhs], self.env[rhs])
             case tir.Read(name):
                 if not self.inputs:
                     raise ValueError("$read requires another input number")
-                self.env[name] = _signed_64(self.inputs.pop(0))
+                self.env[name] = to_i64(self.inputs.pop(0))
             case tir.Print(name):
                 self.outputs.append(self.env[name])
 

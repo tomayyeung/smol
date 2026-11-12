@@ -25,6 +25,7 @@ from smol.front.lex import Lexer
 from smol.front.lower import lower
 from smol.front.parse import parse
 from smol.middle.opt import optimize
+from smol.middle.const import analyze
 from smol.middle.tir import Program
 
 
@@ -40,7 +41,7 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-o",
         "--out",
-        choices=("tokens", "ast", "tir", "asm"),
+        choices=("tokens", "ast", "tir", "asm", "const-prop"),
         default="tokens",
         help="the output format (default: tokens)",
     )
@@ -60,6 +61,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(parse(source))
     elif args.out == "tir":
         print(_get_ir(source, args.optimize), end="")
+    elif args.out == "const-prop":
+        for bb, state in sorted(analyze(_get_ir(source, args.optimize)).items()):
+            print(f'{bb}:')
+            for x, v in sorted(state.items()):
+                print(f'\t{x} -> {v}')
     else:
         print(code_gen(_get_ir(source, args.optimize)).asm_code(), end="")
 
